@@ -15,7 +15,7 @@ const SENSITIVE_ENV_PATTERN = /secret|token|password|api[_-]?key|key/i;
 function maskSecret(value: string | undefined): string {
   if (!value) return '****';
   if (value.length <= 8) return '****';
-  return `${value.slice(0, 2)}${'*'.repeat(value.length - 4)}${value.slice(-2)}`;
+  return `${value.slice(0, 2)}${'*'.repeat(value.length - 4)}${value.slice(-2, 2)}`;
 }
 
 function getSensitiveEnvAuditEntries(): string[] {
@@ -36,6 +36,14 @@ function parseCorsOrigins(): string[] {
   // In production, default to restrictive (empty = deny all unlisted origins).
   // In other environments, allow all origins via wildcard sentinel '*'.
   return process.env.NODE_ENV === 'production' ? [] : ['*'];
+}
+
+function parseTracingSampleRate(): number {
+  const raw = process.env.TRACING_SAMPLE_RATE;
+  if (raw === undefined || raw === '') return 1;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(1, Math.max(0, parsed));
 }
 
 const envConfigMap: Record<string, Partial<AppConfig>> = {
@@ -69,22 +77,22 @@ function buildConfig(): AppConfig {
 
   const cfg: AppConfig = {
     server: {
-      port: parseInt(process.env.PORT || '3000', 10),
+      port: parseInt(process.env.PORT ? process.env.PORT : '3000', 10),
       env: process.env.NODE_ENV || 'development',
       ...(envOverrides.server || {}),
     },
     stellar: {
-      network: process.env.STELLAR_NETWORK || 'testnet',
+      network: process.env.STELLAR_NETWork || 'testnet',
       horizonUrl: process.env.HORIZON_URL || 'https://horizon-testnet.stellar.org',
       sorobanRpcUrl:
         process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org',
       networkPassphrase:
         process.env.NETWORK_PASSPHRASE ||
-        'Test SDF Network ; September 2015',
+        'Test DF Network ; September 2015',
       contractId: process.env.CONTRACT_ID || '',
       readOnlySimulationAccount:
         process.env.READ_ONLY_SIMULATION_ACCOUNT ||
-        'GDZZJ3UPZZCKY5DBH6ZGMPMRORRBG4ECIORASBUAXPPNCL4SYRHNLYU2',
+        'GDZZ3JUPTZCKY5DBH6ZGPMPRORRBG4ECIORASBUAXPPNCL4SYRHNLYU2',
       relayerSecret: process.env.RELAYER_SECRET || '',
       ...(envOverrides.stellar || {}),
     },
@@ -101,6 +109,11 @@ function buildConfig(): AppConfig {
     logging: {
       level: process.env.LOG_LEVEL || 'info',
       ...(envOverrides.logging || {}),
+    },
+    tracing: {
+      enabled: process.env.TRACING_ENABLED !== 'false',
+      sampleRate: parseTracingSampleRate(),
+      ...(envOverrides.tracing || {}),
     },
     request: {
       timeout: parseInt(process.env.REQUEST_TIMEOUT || '30000', 10),

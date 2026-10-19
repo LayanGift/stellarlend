@@ -1,6 +1,8 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import { metricsMiddleware, metricsHandler } from './observability/metrics';
+import { tracingMiddleware } from './observability/tracing';
 import rateLimit, { MemoryStore } from 'express-rate-limit';
 import { config } from './config';
 import { bodySizeLimitMiddleware } from './middleware/bodySizeLimit';
@@ -82,6 +84,7 @@ import { swaggerSpec, versionListHandler, v1Spec } from './config/swagger';
 import { versionMiddleware, legacyCompatibilityMiddleware } from './middleware/versioning';
 import logger from './utils/logger';
 import { requestIdMiddleware } from './middleware/requestId';
+// NOTE: requestLogger must not contain numeric-literal-followed-by-identifier (e.g. `100ms`); use quoted strings.
 import { requestLogger } from './middleware/requestLogger';
 import { sanitizeInput } from './middleware/sanitizeInput';
 import { fieldSelectionMiddleware } from './middleware/fieldSelection';
@@ -91,6 +94,9 @@ import cacheRoutes from './routes/cache.routes';
 const app: Application = express();
 app.use(requestIdMiddleware);
 app.use(requestLogger);
+// Observability: HTTP metrics + distributed tracing (no-op unless configured)
+app.use(metricsMiddleware);
+app.use(tracingMiddleware);
 
 const ipRateLimitStore = new MemoryStore();
 const userRateLimitStore = new MemoryStore();
@@ -148,6 +154,10 @@ const corsOptions: cors.CorsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: config.bodySizeLimit.limit }));
 app.use(express.urlencoded({ extended: true, limit: config.bodySizeLimit.limit }));
+
+// Prometheus scrape endpoint (unauthenticated, excluded from rate limiting)
+app.get('/metrics', metricsHandler);
+
 app.use(sanitizeInput);
 app.use(bodySizeLimitMiddleware);
 app.use(fieldSelectionMiddleware);
@@ -272,7 +282,6 @@ app.use('/api/liquidations', opportunityExplorerRoutes);
 app.use('/api/treasury', treasuryRoutes);
 app.use('/api/audit-findings', auditFindingsRoutes);
 app.use('/api/security-reports', securityRoutes);
-app.use('/api/metrics', legacySystemCompat, metricsRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/sns', snsRoutes);
 app.use('/api/simulator', simulatorRoutes);
@@ -299,6 +308,9 @@ app.use('/api/parameters', legacyGovernanceCompat, parametersRoutes);
 app.use('/api/cache', legacySystemCompat, cacheRoutes);
 
 app.use(errorHandler);
+
+// Graceful shutdown for the tracing exporter
+process.on('SIGTERM', () => void import('./observability/tracing').then((m) => m.shutdownTracing()));
 
 void redisCacheService.warmup(async () => {
   const { StellarService } = await import('./services/stellar.service.js');
