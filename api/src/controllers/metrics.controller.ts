@@ -12,6 +12,11 @@ import {
   recordProtocolMetric,
   renderMetrics,
 } from '../services/metrics.service';
+import {
+  getEventIndexer,
+  formatIndexerMetricsAsJson,
+  formatIndexerMetricsAsPrometheus,
+} from '../services/eventIndex';
 
 /**
  * GET /api/metrics/timeseries?metric=&from=&to=&interval=
@@ -105,6 +110,31 @@ export const getPrometheusMetrics = async (
     const body = await renderMetrics();
     res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
     res.status(200).send(body);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/metrics/indexer
+ * Exposes indexer telemetry in Prometheus format or JSON
+ */
+export const getIndexerMetrics = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const indexer = getEventIndexer();
+    const status = await indexer.status();
+    const alerts = indexer.getAlerts();
+    const accept = req.headers['accept'] || '';
+    if (accept.includes('application/json') || req.query.format === 'json') {
+      res.json(formatIndexerMetricsAsJson(status, alerts));
+    } else {
+      res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+      res.send(formatIndexerMetricsAsPrometheus(status, alerts));
+    }
   } catch (error) {
     next(error);
   }
